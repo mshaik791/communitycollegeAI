@@ -1,0 +1,90 @@
+// Prisma schema for the API service
+// SQLite database stored at apps/api/prisma/dev.db
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model StudentSession {
+  id               String   @id @default(cuid())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  studentName      String?
+  studentEmail     String?
+  studentPhone     String?
+
+  language         String   @default("en")
+  persona          String   @default("sofia")
+
+  status           String   @default("STARTED")
+
+  riskScore        Int      @default(0)
+  sentimentStart   Int?
+  sentimentEnd     Int?
+
+  chatRecommended  Boolean @default(false)
+
+  withdrawIntent   Boolean @default(true)
+  withdrawPrevented Boolean?
+
+  transcriptText       String?
+  summaryText          String?
+  tavusConversationId  String?
+  perceptionData       String?
+  emotionalInsight     String?
+
+  barrierEvents     BarrierEvent[]
+  chatMessages      ChatMessage[]
+  callbackRequests  CallbackRequest[]
+}
+
+model BarrierEvent {
+  id        String        @id @default(cuid())
+  createdAt DateTime      @default(now())
+
+  sessionId String
+  session   StudentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  code      String
+  severity  String
+  notes     String?
+
+  @@unique([sessionId, code])
+  @@index([sessionId])
+}
+
+model ChatMessage {
+  id        String          @id @default(cuid())
+  createdAt DateTime        @default(now())
+
+  sessionId String
+  session   StudentSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  sender    String
+  text      String
+
+  @@index([sessionId])
+}
+
+model CallbackRequest {
+  id            String             @id @default(cuid())
+  createdAt     DateTime           @default(now())
+
+  sessionId     String
+  session       StudentSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  counselorName String             @default("Jimmy")
+  status        String             @default("PENDING")
+
+  smsSent       Boolean            @default(false)
+  smsError      String?
+
+  @@index([sessionId])
+}
+
