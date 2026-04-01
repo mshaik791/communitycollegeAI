@@ -19,6 +19,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "../db/prisma";
 import { getIo } from "../socket/io";
 import { getSessionSnapshot } from "../services/sessionSnapshot";
+import { sendCounselorAlert } from "../services/emailAlert";
+import { logToStarfish } from "../services/starfish";
 
 const router = Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -204,6 +206,28 @@ async function handleWebhookEvent(
           create: { sessionId: session!.id, code: b.code, severity: b.severity, notes: b.notes ?? null },
         });
       }
+
+      // Fire-and-forget: email alert + Starfish logging
+      sendCounselorAlert({
+        sessionId: session.id,
+        riskScore: analysis.riskScore,
+        riskLabel: analysis.riskLabel,
+        studentName: session.studentName,
+        caseSummary: analysis.caseSummary,
+        barriers: analysis.barriers,
+        nextSteps: analysis.nextSteps,
+        emotionalInsight: analysis.emotionalInsight ?? null,
+        urgency: analysis.urgency,
+      }).catch(console.error);
+
+      logToStarfish({
+        sessionId: session.id,
+        studentName: session.studentName,
+        riskScore: analysis.riskScore,
+        barriers: analysis.barriers,
+        caseSummary: analysis.caseSummary,
+        nextSteps: analysis.nextSteps,
+      }).catch(console.error);
 
       // Push real-time update to staff dashboard
       try {

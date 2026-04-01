@@ -42,6 +42,7 @@ model StudentSession {
   barrierEvents     BarrierEvent[]
   chatMessages      ChatMessage[]
   callbackRequests  CallbackRequest[]
+  followUps         FollowUp[]
 }
 
 model BarrierEvent {
@@ -84,6 +85,23 @@ model CallbackRequest {
 
   smsSent       Boolean            @default(false)
   smsError      String?
+
+  @@index([sessionId])
+}
+
+model FollowUp {
+  id            String         @id @default(cuid())
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  sessionId     String
+  session       StudentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  scheduledFor  DateTime
+  counselorName String
+  notes         String?
+  status        String         @default("SCHEDULED")
+  completedAt   DateTime?
 
   @@index([sessionId])
 }

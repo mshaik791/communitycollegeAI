@@ -46,10 +46,20 @@ const tooltipStyle = {
   boxShadow: "var(--shadow-glass)",
 };
 
+interface PredictiveFlag {
+  id: string;
+  createdAt: string;
+  riskScore: number;
+  studentName: string | null;
+  summaryText: string | null;
+}
+
 export default function AnalyticsPage() {
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const [predictiveFlags, setPredictiveFlags] = useState<PredictiveFlag[]>([]);
+  const [runningPredictive, setRunningPredictive] = useState(false);
 
   useEffect(() => {
     let canceled = false;
@@ -62,6 +72,18 @@ export default function AnalyticsPage() {
     const id = setInterval(() => { setTick((t) => t + 1); fetchSummary(); }, 5000);
     return () => { canceled = true; clearInterval(id); };
   }, []);
+
+  // Load predictive flags (STARTED sessions with predictive risk scores)
+  useEffect(() => {
+    api.get<{ sessions: PredictiveFlag[] }>("/analytics/sessions?status=STARTED&limit=20")
+      .then((res) => {
+        const flags = res.sessions.filter(
+          (s) => s.summaryText?.includes("[PREDICTIVE FLAG]"),
+        );
+        setPredictiveFlags(flags);
+      })
+      .catch(() => {});
+  }, [tick]);
 
   const riskBucketData = useMemo(
     () => summary ? [
@@ -402,6 +424,86 @@ export default function AnalyticsPage() {
           </div>
         </div>
       )}
+
+      {/* Predictive Risk Flags */}
+      <div className="glass rounded-2xl p-6">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <div>
+            <p className="eyebrow mb-1">Predictive detection</p>
+            <h2 style={{ fontFamily: "'DM Serif Display', Georgia, serif", fontSize: "1.4rem" }}>
+              Proactive Risk Flags
+            </h2>
+          </div>
+          <button
+            type="button"
+            disabled={runningPredictive}
+            onClick={async () => {
+              setRunningPredictive(true);
+              try {
+                await fetch("/api/admin/predictive-analysis", { method: "POST" });
+                setTimeout(() => {
+                  api.get<{ sessions: PredictiveFlag[] }>("/analytics/sessions?status=STARTED&limit=20")
+                    .then((res) => setPredictiveFlags(res.sessions.filter((s) => s.summaryText?.includes("[PREDICTIVE FLAG]"))))
+                    .catch(() => {});
+                }, 2000);
+              } finally {
+                setRunningPredictive(false);
+              }
+            }}
+            className="btn-glass-secondary"
+            style={{ padding: "7px 16px", fontSize: "12px", opacity: runningPredictive ? 0.6 : 1 }}
+          >
+            {runningPredictive ? "Running…" : "🔮 Run now"}
+          </button>
+        </div>
+
+        {predictiveFlags.length === 0 ? (
+          <p className="text-sm font-light text-center py-6" style={{ color: "var(--text-faint)" }}>
+            No predictive flags detected. Flags appear for sessions older than 24 hours with no transcript or late-night contact attempts.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {predictiveFlags.map((flag) => {
+              const reason = flag.summaryText?.replace("[PREDICTIVE FLAG] Session shows early risk signals: ", "").replace(" Recommend proactive outreach.", "") ?? "";
+              return (
+                <div
+                  key={flag.id}
+                  className="flex items-center justify-between gap-4 rounded-xl px-4 py-3"
+                  style={{ background: "rgba(255,255,255,0.4)", border: "1px solid rgba(200,190,220,0.2)" }}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span
+                      className="chip shrink-0"
+                      style={{
+                        background: flag.riskScore >= 50 ? "rgba(192,136,48,0.1)" : "rgba(155,142,196,0.1)",
+                        border: `1px solid ${flag.riskScore >= 50 ? "rgba(192,136,48,0.25)" : "rgba(155,142,196,0.2)"}`,
+                        color: flag.riskScore >= 50 ? "var(--risk-med)" : "var(--lavender-dark)",
+                      }}
+                    >
+                      {flag.riskScore}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+                        {flag.studentName ?? "Anonymous student"}
+                      </div>
+                      <div className="text-xs font-light truncate" style={{ color: "var(--text-muted)" }}>
+                        {reason}
+                      </div>
+                    </div>
+                  </div>
+                  <a
+                    href="/staff"
+                    className="btn-glass-secondary shrink-0"
+                    style={{ padding: "5px 12px", fontSize: "11px" }}
+                  >
+                    Schedule outreach →
+                  </a>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

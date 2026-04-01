@@ -308,5 +308,37 @@ router.get(
   },
 );
 
+// POST /v1/session/:id/capture-name — called by Tavus tool when student says their name
+router.post("/:id/capture-name", async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { first_name, full_name } = req.body as { first_name?: string; full_name?: string };
+
+  const studentName = (full_name ?? first_name ?? "").trim();
+  if (!studentName) {
+    return res.status(400).json({ error: "No name provided" });
+  }
+
+  try {
+    await prisma.studentSession.update({
+      where: { id },
+      data: { studentName },
+    });
+
+    try {
+      getIo().to("staff").emit("session:name_captured", { sessionId: id, studentName });
+    } catch {
+      // Socket not initialized — non-fatal
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`✅ Student name captured: "${studentName}" for session: ${id}`);
+    return res.json({ ok: true, studentName });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("Name capture error:", error);
+    return res.status(500).json({ error: "Failed to save student name" });
+  }
+});
+
 export default router;
 

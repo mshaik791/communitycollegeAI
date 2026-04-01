@@ -65,6 +65,16 @@ interface AnalysisPayload {
   perceptionHighlights?: string;
 }
 
+interface FollowUpItem {
+  id: string;
+  sessionId: string;
+  scheduledFor: string;
+  counselorName: string;
+  notes: string | null;
+  status: string;
+  completedAt: string | null;
+}
+
 type StaffSocket = Socket<
   {
     "student:join": (p: { sessionId: string }) => void;
@@ -78,6 +88,8 @@ type StaffSocket = Socket<
     "chat:recommended": (p: { sessionId: string }) => void;
     "callback:requested": (p: { snapshot: SessionSnapshot }) => void;
     "analysis:complete": (p: AnalysisPayload) => void;
+    "session:name_captured": (p: { sessionId: string; studentName: string }) => void;
+    "followup:scheduled": (p: { sessionId: string; followUp: FollowUpItem }) => void;
   }
 >;
 
@@ -174,6 +186,11 @@ export default function StaffDashboardPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [completedSteps, setCompletedSteps] = useState<Record<number, boolean>>({});
   const [perceptionHighlights, setPerceptionHighlights] = useState<string | null>(null);
+  const [followUps, setFollowUps] = useState<FollowUpItem[]>([]);
+  const [showFollowUpForm, setShowFollowUpForm] = useState(false);
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [followUpTime, setFollowUpTime] = useState("");
+  const [followUpNotes, setFollowUpNotes] = useState("");
 
   const socketRef = useRef<StaffSocket | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
@@ -206,6 +223,13 @@ export default function StaffDashboardPage() {
     setError(null);
     setCompletedSteps({});
     setPerceptionHighlights(null);
+    setFollowUps([]);
+    setShowFollowUpForm(false);
+    // Fetch follow-ups for this session
+    fetch(`/api/session/${selectedId}/followups`)
+      .then((r) => r.json())
+      .then((data: FollowUpItem[]) => setFollowUps(Array.isArray(data) ? data : []))
+      .catch(() => {});
     api.get<SessionSnapshot>(`/session/${selectedId}`)
       .then((snapshot) => {
         setSelected(snapshot);
@@ -273,8 +297,24 @@ export default function StaffDashboardPage() {
       showToast(toastMsg);
     });
 
+    socket.on("session:name_captured", (payload) => {
+      setSessions((prev) => prev.map((s) =>
+        s.id === payload.sessionId ? { ...s, studentName: payload.studentName } : s
+      ));
+      setSelected((prev) => prev && prev.session.id === payload.sessionId
+        ? { ...prev, session: { ...prev.session, studentName: payload.studentName } }
+        : prev
+      );
+    });
+
+    socket.on("followup:scheduled", (payload) => {
+      if (payload.sessionId === selectedId) {
+        setFollowUps((prev) => [...prev, payload.followUp]);
+      }
+    });
+
     return () => { socket.disconnect(); socketRef.current = null; };
-  }, [demoStaff]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [demoStaff, selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll chat
   useEffect(() => {
@@ -674,6 +714,103 @@ export default function StaffDashboardPage() {
                   </div>
                 </div>
               )}
+
+              {/* Follow-up scheduling */}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <p className="eyebrow">Follow-up calls</p>
+                  <button
+                    type="button"
+                    onClick={() => setShowFollowUpForm((v) => !v)}
+                    style={{ fontSize: 11, padding: "3px 10px", borderRadius: 8, background: "rgba(126,184,176,0.1)", border: "1px solid rgba(126,184,176,0.25)", color: "var(--teal-dark)", cursor: "pointer" }}
+                  >
+                    + Schedule
+                  </button>
+                </div>
+
+                {showFollowUpForm && (
+                  <div style={{ background: "rgba(255,255,255,0.5)", borderRadius: 12, padding: 12, border: "1px solid rgba(255,255,255,0.7)", marginBottom: 8 }}>
+                    <input
+                      type="date"
+                      value={followUpDate}
+                      onChange={(e) => setFollowUpDate(e.target.value)}
+                      style={{ width: "100%", marginBottom: 6, fontSize: 12, padding: "6px 8px", borderRadius: 6, border: "1px solid rgba(200,190,220,0.3)", background: "rgba(255,255,255,0.7)", boxSizing: "border-box" }}
+                    />
+                    <input
+                      type="time"
+                      value={followUpTime}
+                      onChange={(e) => setFollowUpTime(e.target.value)}
+                      style={{ width: "100%", marginBottom: 6, fontSize: 12, padding: "6px 8px", borderRadius: 6, border: "1px solid rgba(200,190,220,0.3)", background: "rgba(255,255,255,0.7)", boxSizing: "border-box" }}
+                    />
+                    <textarea
+                      placeholder="Notes for this call…"
+                      value={followUpNotes}
+                      onChange={(e) => setFollowUpNotes(e.target.value)}
+                      style={{ width: "100%", marginBottom: 6, fontSize: 12, padding: "6px 8px", borderRadius: 6, border: "1px solid rgba(200,190,220,0.3)", background: "rgba(255,255,255,0.7)", resize: "none", height: 60, boxSizing: "border-box" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!followUpDate || !followUpTime || !selectedId) return;
+                        const scheduledFor = new Date(`${followUpDate}T${followUpTime}`);
+                        await fetch(`/api/session/${selectedId}/followup`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ scheduledFor, counselorName: "Navigator", notes: followUpNotes }),
+                        });
+                        setShowFollowUpForm(false);
+                        setFollowUpDate("");
+                        setFollowUpTime("");
+                        setFollowUpNotes("");
+                        const r = await fetch(`/api/session/${selectedId}/followups`);
+                        const data = await r.json() as FollowUpItem[];
+                        setFollowUps(Array.isArray(data) ? data : []);
+                      }}
+                      style={{ width: "100%", padding: 7, borderRadius: 8, fontSize: 12, background: "linear-gradient(135deg,#7eb8b0,#9b8ec4)", color: "#fff", border: "none", cursor: "pointer" }}
+                    >
+                      Schedule call
+                    </button>
+                  </div>
+                )}
+
+                {followUps.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {followUps.map((fu) => (
+                      <div
+                        key={fu.id}
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          padding: "8px 10px", borderRadius: 8,
+                          background: fu.status === "COMPLETED" ? "rgba(74,158,149,0.08)" : "rgba(255,255,255,0.5)",
+                          border: `1px solid ${fu.status === "COMPLETED" ? "rgba(74,158,149,0.2)" : "rgba(255,255,255,0.7)"}`,
+                          fontSize: 12,
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 500, color: "var(--text-primary)" }}>
+                            {new Date(fu.scheduledFor).toLocaleDateString()} at {new Date(fu.scheduledFor).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                          {fu.notes && <div style={{ color: "var(--text-muted)", marginTop: 2 }}>{fu.notes}</div>}
+                        </div>
+                        {fu.status !== "COMPLETED" && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await fetch(`/api/followup/${fu.id}/complete`, { method: "PATCH" });
+                              const r = await fetch(`/api/session/${selectedId}/followups`);
+                              const data = await r.json() as FollowUpItem[];
+                              setFollowUps(Array.isArray(data) ? data : []);
+                            }}
+                            style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: "rgba(74,158,149,0.1)", border: "1px solid rgba(74,158,149,0.2)", color: "var(--teal-dark)", cursor: "pointer" }}
+                          >
+                            Mark done ✓
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Chat thread */}
               <div className="flex flex-col gap-2">
